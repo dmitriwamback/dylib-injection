@@ -3,10 +3,12 @@ import Cocoa
 
 class Injector {
 
-    var pipe: Pipe!
+    var pipe:                   Pipe!
+    var applicationPath:        String!
+    var dylibBuildName: String = "__injectsrc"
 
-    func compileToDynamicLibrary() {
-
+    init(applicationPath: String) {
+        self.applicationPath = applicationPath
     }
 
     func createProcess(command: [String]) -> Process {
@@ -21,7 +23,6 @@ class Injector {
         return task
     }
 
-
     func runTask(process: Process) -> String {
 
         var output = ""
@@ -34,10 +35,11 @@ class Injector {
         return output
     }
 
-
-    func startWithInjection() -> String {
+    func startWithInjection(source: String) -> String {
         
-        let basicCommand = ["-c", "DYLD_INSERT_LIBRARIES=calculator.dylib ./a.out"]
+        buildDynamicLibraryFromRawCSource(source: source)
+        unrestrictTargetApplication()
+        let basicCommand = ["-c", "DYLD_INSERT_LIBRARIES=\(dylibBuildName).dylib "+self.applicationPath]
 
         return runTask(process: createProcess(command: basicCommand))
     }
@@ -47,5 +49,42 @@ class Injector {
         return runTask(process: createProcess(command: command))
     }
 }
-let main = Injector()
-print(main.startWithInjection())
+extension Injector {
+
+    func unrestrictTargetApplication() {
+
+    }
+
+    func buildDynamicLibraryFromRawCSource(source: String) {
+
+        let file = URL(fileURLWithPath: dylibBuildName+".c")
+        do {
+            try source.write(to: file, atomically: true, encoding: .utf8)
+        }
+        catch { print(error) }
+
+        let commands = [
+            "-c", "gcc -dynamiclib \(dylibBuildName).c -o \(dylibBuildName).dylib"
+        ]
+        let buildDylibProcess = createProcess(command: commands)
+        print(runTask(process: buildDylibProcess))
+    }
+}
+
+
+let main = Injector(applicationPath: "testapp/a.out")
+print(main.startWithInjection(source: """
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+int system(const char* command);
+
+#define LOGGED_IN true
+
+__attribute__((constructor))
+static void customConstructor(int argc, const char** argv) {
+    system(\"open -a Calculator\");
+}
+
+"""))
